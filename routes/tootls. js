@@ -1,17 +1,363 @@
 const express = require("express");
 const router = express.Router();
+const crypto = require("crypto");
 
-// ⏰ HEURE
+// 🌸 LOGGER
+const logger = {
+  info: (msg) => console.log("ℹ️  [TOOLS] " + msg),
+  success: (msg) => console.log("✅ [TOOLS] " + msg),
+  warn: (msg) => console.log("⚠️  [TOOLS] " + msg),
+  error: (msg) => console.log("❌ [TOOLS] " + msg),
+  naruto: (msg) => console.log("🍥 [TOOLS] " + msg)
+};
+
+// ⏰ TIME & DATE
 router.get("/time", (req, res) => {
+  const now = new Date();
+  
   res.json({
-    time: new Date().toLocaleString("fr-FR")
+    time: now.toLocaleString("fr-FR"),
+    iso: now.toISOString(),
+    unix: now.getTime(),
+    timezone: "Europe/Paris",
+    formatted: {
+      date: now.toLocaleDateString("fr-FR"),
+      time: now.toLocaleTimeString("fr-FR"),
+      day: now.toLocaleDateString("fr-FR", { weekday: "long" }),
+      month: now.toLocaleDateString("fr-FR", { month: "long" }),
+      year: now.getFullYear()
+    }
   });
 });
 
 // 📌 PREFIX
 router.get("/prefix", (req, res) => {
   res.json({
-    prefix: "/"
+    prefix: "/api/tools",
+    endpoints: {
+      "/time": "GET - Heure actuelle",
+      "/prefix": "GET - Préfixe",
+      "/hash": "GET - Hasher un texte",
+      "/uuid": "GET - Générer UUID",
+      "/random": "GET - Nombre aléatoire",
+      "/encode": "GET - Encoder/Decoder",
+      "/qrcode": "GET - Générer QR Code",
+      "/json-format": "POST - Formater JSON",
+      "/text-stats": "POST - Statistiques texte",
+      "/password-gen": "GET - Générer mot de passe",
+      "/base64": "GET - Encoder/Decoder Base64",
+      "/url-encode": "GET - URL Encode/Decode",
+      "/calculator": "GET - Calculatrice simple"
+    }
+  });
+});
+
+// 🔐 HASH
+router.get("/hash", (req, res) => {
+  const text = req.query.text;
+  const type = req.query.type || "sha256";
+
+  if (!text) {
+    return res.status(400).json({ error: "Texte requis" });
+  }
+
+  try {
+    const hash = crypto.createHash(type).update(text).digest("hex");
+    
+    logger.success(`Hash ${type}: "${text.substring(0, 20)}..."`);
+    
+    res.json({
+      text,
+      type,
+      hash,
+      lengths: {
+        original: text.length,
+        hash: hash.length
+      },
+      algorithms: ["md5", "sha1", "sha256", "sha512"]
+    });
+  } catch (e) {
+    logger.error(`Hash error: ${e.message}`);
+    res.status(400).json({ error: "Algorithme invalide", message: e.message });
+  }
+});
+
+// 🆔 UUID GENERATOR
+router.get("/uuid", (req, res) => {
+  const { v4 } = require("uuid");
+  
+  logger.naruto("🆔 Générant UUIDs...");
+  
+  res.json({
+    single: require("crypto").randomUUID(),
+    multiple: Array.from({ length: 5 }, () => require("crypto").randomUUID()),
+    info: "UUID v4 - Aléatoire",
+    timestamp: new Date().toISOString()
+  });
+});
+
+// 🎲 RANDOM NUMBER
+router.get("/random", (req, res) => {
+  const min = parseInt(req.query.min) || 0;
+  const max = parseInt(req.query.max) || 100;
+  const count = parseInt(req.query.count) || 1;
+
+  if (min >= max) {
+    return res.status(400).json({ error: "min doit être < max" });
+  }
+
+  const generateRandom = () => Math.floor(Math.random() * (max - min + 1)) + min;
+  
+  logger.info(`Générant ${count} nombre(s) entre ${min} et ${max}`);
+
+  res.json({
+    range: { min, max },
+    count,
+    numbers: Array.from({ length: count }, generateRandom),
+    single: generateRandom(),
+    timestamp: new Date().toISOString()
+  });
+});
+
+// 🔄 ENCODE/DECODE
+router.get("/encode", (req, res) => {
+  const text = req.query.text;
+  const type = req.query.type || "base64";
+
+  if (!text) {
+    return res.status(400).json({ error: "Texte requis" });
+  }
+
+  try {
+    let encoded, decoded;
+
+    switch (type) {
+      case "base64":
+        encoded = Buffer.from(text).toString("base64");
+        decoded = Buffer.from(encoded, "base64").toString("utf-8");
+        break;
+      case "hex":
+        encoded = Buffer.from(text).toString("hex");
+        decoded = Buffer.from(encoded, "hex").toString("utf-8");
+        break;
+      case "uri":
+        encoded = encodeURIComponent(text);
+        decoded = decodeURIComponent(encoded);
+        break;
+      default:
+        return res.status(400).json({ error: "Type invalide" });
+    }
+
+    logger.success(`Encodé en ${type}`);
+
+    res.json({
+      text,
+      type,
+      encoded,
+      decoded,
+      length: text.length
+    });
+  } catch (e) {
+    logger.error(`Encode error: ${e.message}`);
+    res.status(400).json({ error: e.message });
+  }
+});
+
+// 🔐 PASSWORD GENERATOR
+router.get("/password-gen", (req, res) => {
+  const length = Math.min(parseInt(req.query.length) || 16, 128);
+  const includeSymbols = req.query.symbols !== "false";
+  
+  const lowercase = "abcdefghijklmnopqrstuvwxyz";
+  const uppercase = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+  const numbers = "0123456789";
+  const symbols = "!@#$%^&*()_+-=[]{}|;:,.<>?";
+
+  let chars = lowercase + uppercase + numbers;
+  if (includeSymbols) chars += symbols;
+
+  const password = Array.from({ length }, () =>
+    chars.charAt(Math.floor(Math.random() * chars.length))
+  ).join("");
+
+  logger.success(`🔐 Mot de passe généré (${length} chars)`);
+
+  res.json({
+    password,
+    length,
+    strength: password.length >= 16 ? "TRÈS FORT" : password.length >= 12 ? "FORT" : "MOYEN",
+    includes_symbols: includeSymbols,
+    timestamp: new Date().toISOString()
+  });
+});
+
+// 📊 TEXT STATISTICS
+router.post("/text-stats", (req, res) => {
+  const { text } = req.body;
+
+  if (!text) {
+    return res.status(400).json({ error: "Texte requis" });
+  }
+
+  const words = text.trim().split(/\s+/).filter(w => w.length > 0);
+  const sentences = text.split(/[.!?]+/).filter(s => s.trim().length > 0);
+  const lines = text.split("\n");
+  const chars = text.length;
+  const charsNoSpaces = text.replace(/\s/g, "").length;
+
+  logger.naruto(`📊 Analysant texte (${chars} chars)`);
+
+  res.json({
+    characters: chars,
+    characters_no_spaces: charsNoSpaces,
+    words: words.length,
+    sentences: sentences.length,
+    lines: lines.length,
+    paragraphs: text.split(/\n\n+/).filter(p => p.trim().length > 0).length,
+    average_word_length: Math.round(charsNoSpaces / words.length || 0),
+    average_sentence_length: Math.round(words.length / sentences.length || 0),
+    most_common_word: getMostCommonWord(words),
+    timestamp: new Date().toISOString()
+  });
+});
+
+// 🎨 QR CODE GENERATOR
+router.get("/qrcode", (req, res) => {
+  const text = req.query.text || "https://github.com";
+  
+  logger.naruto(`📱 Générant QR Code pour: ${text}`);
+
+  res.json({
+    text,
+    qrcode_url: `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(text)}`,
+    size: "300x300",
+    message: "Scannez le QR Code pour accéder au lien!"
+  });
+});
+
+// 📝 JSON FORMATTER
+router.post("/json-format", (req, res) => {
+  const { json, indent } = req.body;
+
+  if (!json) {
+    return res.status(400).json({ error: "JSON requis" });
+  }
+
+  try {
+    const parsed = typeof json === "string" ? JSON.parse(json) : json;
+    const formatted = JSON.stringify(parsed, null, indent || 2);
+    const minified = JSON.stringify(parsed);
+
+    logger.success(`JSON formaté (${formatted.length} chars)`);
+
+    res.json({
+      formatted,
+      minified,
+      valid: true,
+      size: {
+        formatted: formatted.length,
+        minified: minified.length
+      }
+    });
+  } catch (e) {
+    logger.error(`JSON error: ${e.message}`);
+    res.status(400).json({ error: "JSON invalide", message: e.message });
+  }
+});
+
+// 🧮 CALCULATOR
+router.get("/calculator", (req, res) => {
+  const { a, b, op } = req.query;
+
+  if (!a || !b || !op) {
+    return res.status(400).json({
+      error: "Paramètres requis: a, b, op (+, -, *, /, %)"
+    });
+  }
+
+  const num1 = parseFloat(a);
+  const num2 = parseFloat(b);
+
+  if (isNaN(num1) || isNaN(num2)) {
+    return res.status(400).json({ error: "a et b doivent être des nombres" });
+  }
+
+  let result;
+  switch (op) {
+    case "+":
+      result = num1 + num2;
+      break;
+    case "-":
+      result = num1 - num2;
+      break;
+    case "*":
+      result = num1 * num2;
+      break;
+    case "/":
+      if (num2 === 0) return res.status(400).json({ error: "Division par zéro!" });
+      result = num1 / num2;
+      break;
+    case "%":
+      result = num1 % num2;
+      break;
+    default:
+      return res.status(400).json({ error: "Opération invalide" });
+  }
+
+  logger.info(`Calcul: ${num1} ${op} ${num2} = ${result}`);
+
+  res.json({
+    a: num1,
+    b: num2,
+    operation: op,
+    result: Math.round(result * 10000) / 10000,
+    timestamp: new Date().toISOString()
+  });
+});
+
+// ⚡ HELPER: Most common word
+function getMostCommonWord(words) {
+  const frequency = {};
+  words.forEach(word => {
+    const lower = word.toLowerCase();
+    frequency[lower] = (frequency[lower] || 0) + 1;
+  });
+
+  return Object.entries(frequency)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 5)
+    .map(([word, count]) => ({ word, count }));
+}
+
+// 📊 INFO ENDPOINT
+router.get("/info", (req, res) => {
+  res.json({
+    name: "🍥 NEO TOOLS 🍥",
+    version: "2.0.0",
+    category: "Utilitaires",
+    tools: [
+      "⏰ Time & Date",
+      "🔐 Hash Generator",
+      "🆔 UUID Generator",
+      "🎲 Random Numbers",
+      "🔄 Encode/Decode",
+      "🔐 Password Generator",
+      "📊 Text Statistics",
+      "📱 QR Code",
+      "📝 JSON Formatter",
+      "🧮 Calculator"
+    ],
+    creator: "Célestin Olua",
+    inspiration: "Naruto Uzumaki"
+  });
+});
+
+// ❌ ERROR HANDLER
+router.use((err, req, res, next) => {
+  logger.error(err.message);
+  res.status(500).json({
+    error: "Erreur Tools",
+    message: "🍥 Naruto's tools are broken! 🍥"
   });
 });
 
