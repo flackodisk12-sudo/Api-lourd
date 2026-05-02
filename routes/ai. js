@@ -2,32 +2,284 @@ const express = require("express");
 const axios = require("axios");
 const router = express.Router();
 
-// 🤖 SIMPLE AI ENGINE
-async function askAI(message) {
+// 🌸 LOGGER
+const logger = {
+  info: (msg) => console.log("ℹ️  [AI] " + msg),
+  success: (msg) => console.log("✅ [AI] " + msg),
+  warn: (msg) => console.log("⚠️  [AI] " + msg),
+  error: (msg) => console.log("❌ [AI] " + msg),
+  naruto: (msg) => console.log("🍥 [NARUTO AI] " + msg)
+};
+
+// 🤖 AI ENGINE - MULTI MODELS
+const AI_MODELS = {
+  pollinations: "https://text.pollinations.ai/",
+  openrouter: "https://openrouter.ai/api/v1/chat/completions",
+  huggingface: "https://api-inference.huggingface.co/models/gpt2"
+};
+
+// 🧠 CACHE SIMPLE (pour éviter les appels répétés)
+const cache = new Map();
+const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
+// 🔥 POLLINATIONS AI (Gratuit & Rapide)
+async function askPollinations(message) {
   try {
+    logger.info(`📨 Pollinations: "${message}"`);
+    
     const res = await axios.get(
-      `https://api.allorigins.win/raw?url=https://text.pollinations.ai/${encodeURIComponent(message)}`
+      `https://api.allorigins.win/raw?url=${encodeURIComponent(
+        AI_MODELS.pollinations + encodeURIComponent(message)
+      )}`,
+      { timeout: 8000 }
     );
 
-    return res.data || "Je ne comprends pas...";
+    const reply = res.data || "Je ne comprends pas...";
+    logger.success(`✔️ Réponse reçue (${reply.length} chars)`);
+    
+    return reply;
   } catch (e) {
-    return "Erreur IA 🌸";
+    logger.error(`Pollinations failed: ${e.message}`);
+    return null;
   }
 }
 
-// 📌 ROUTE CHAT
+// 🧠 HUGGING FACE AI (Alternative)
+async function askHuggingFace(message) {
+  try {
+    logger.info(`📨 HuggingFace: "${message}"`);
+    
+    const res = await axios.post(
+      AI_MODELS.huggingface,
+      { inputs: message },
+      {
+        headers: {
+          Authorization: `Bearer ${process.env.HUGGINGFACE_API_KEY || ""}`,
+          "Content-Type": "application/json"
+        },
+        timeout: 8000
+      }
+    );
+
+    const reply = res.data?.[0]?.generated_text || "Je ne comprends pas...";
+    logger.success(`✔️ Réponse HuggingFace reçue`);
+    
+    return reply;
+  } catch (e) {
+    logger.error(`HuggingFace failed: ${e.message}`);
+    return null;
+  }
+}
+
+// 🎯 SMART AI SELECTOR (essaie plusieurs modèles)
+async function askAI(message, model = "auto") {
+  try {
+    // ✅ CHECK CACHE
+    const cacheKey = `${model}:${message}`;
+    if (cache.has(cacheKey)) {
+      const cached = cache.get(cacheKey);
+      if (Date.now() - cached.timestamp < CACHE_TTL) {
+        logger.naruto("🎯 Réponse depuis le CACHE!");
+        return cached.reply;
+      }
+    }
+
+    let reply;
+
+    // 🤖 TRY MODELS
+    if (model === "auto" || model === "pollinations") {
+      reply = await askPollinations(message);
+    }
+
+    if (!reply && (model === "auto" || model === "huggingface")) {
+      reply = await askHuggingFace(message);
+    }
+
+    // ❌ FALLBACK
+    if (!reply) {
+      reply = "🍥 Même Naruto ne peut pas répondre à ça! Réessaye! 🍥";
+      logger.warn("Tous les modèles ont échoué, fallback utilisé");
+    }
+
+    // 💾 CACHE RESULT
+    cache.set(cacheKey, { reply, timestamp: Date.now() });
+
+    return reply;
+  } catch (e) {
+    logger.error(e.message);
+    return "🍥 Erreur IA - Naruto's Chakra est perturbé! 🍥";
+  }
+}
+
+// 📌 CHAT ENDPOINT
 router.get("/chat", async (req, res) => {
   const msg = req.query.message;
+  const model = req.query.model || "auto";
 
-  if (!msg) {
-    return res.json({ error: "Message requis" });
+  if (!msg || msg.trim().length === 0) {
+    return res.status(400).json({
+      error: "Message requis",
+      message: "🍥 Naruto a besoin d'un message! 🍥"
+    });
   }
 
-  const reply = await askAI(msg);
+  if (msg.length > 500) {
+    return res.status(400).json({
+      error: "Message trop long",
+      message: "Maximum 500 caractères",
+      max_chars: 500
+    });
+  }
+
+  logger.naruto(`Chat reçu: "${msg}" (model: ${model})`);
+
+  const reply = await askAI(msg, model);
 
   res.json({
     user: msg,
-    reply
+    reply,
+    model,
+    timestamp: new Date().toISOString(),
+    cached: cache.has(`${model}:${msg}`)
+  });
+});
+
+// 🧠 ADVANCED CHAT (avec contexte)
+router.post("/chat-advanced", async (req, res) => {
+  const { message, context = [], model = "auto" } = req.body;
+
+  if (!message || message.trim().length === 0) {
+    return res.status(400).json({
+      error: "Message requis"
+    });
+  }
+
+  logger.naruto(`Advanced Chat: "${message}" avec ${context.length} messages de contexte`);
+
+  // 📚 BUILD CONTEXT
+  let fullMessage = message;
+  if (context.length > 0) {
+    const contextStr = context
+      .slice(-5) // Last 5 messages only
+      .map((c) => `${c.role}: ${c.content}`)
+      .join("\n");
+    fullMessage = `Contexte:\n${contextStr}\n\nRéponse à: ${message}`;
+  }
+
+  const reply = await askAI(fullMessage, model);
+
+  res.json({
+    user: message,
+    reply,
+    context_length: context.length,
+    model,
+    timestamp: new Date().toISOString()
+  });
+});
+
+// 🎭 NARUTO MODE (Parle comme Naruto!)
+router.get("/naruto", async (req, res) => {
+  const msg = req.query.message;
+
+  if (!msg) {
+    return res.status(400).json({
+      error: "Message requis"
+    });
+  }
+
+  logger.naruto(`🍥 NARUTO MODE ACTIVATED! 🍥`);
+
+  const reply = await askAI(`Réponds comme Naruto Uzumaki (du manga Naruto) en français. Message: ${msg}`);
+
+  res.json({
+    user: msg,
+    naruto_reply: reply,
+    mode: "🍥 NARUTO UZUMAKI 🍥",
+    message: "BELIEVE IT!"
+  });
+});
+
+// 💭 THINK (Réfléchis longuement)
+router.get("/think", async (req, res) => {
+  const msg = req.query.message;
+
+  if (!msg) {
+    return res.status(400).json({
+      error: "Message requis"
+    });
+  }
+
+  logger.naruto(`💭 DEEP THINKING MODE...`);
+
+  const reply = await askAI(
+    `Réfléchis profondément et donne une réponse détaillée et philosophique: ${msg}`
+  );
+
+  res.json({
+    user: msg,
+    deep_reply: reply,
+    mode: "💭 DEEP THINKING",
+    thinking_time: "∞"
+  });
+});
+
+// 🔍 ANALYSIS
+router.post("/analyze", async (req, res) => {
+  const { text } = req.body;
+
+  if (!text || text.trim().length === 0) {
+    return res.status(400).json({
+      error: "Texte requis"
+    });
+  }
+
+  logger.naruto(`🔍 Analysing text (${text.length} chars)`);
+
+  const analysis = await askAI(
+    `Analyse ce texte et donne un résumé, les points clés, le sentiment, et une conclusion: "${text}"`
+  );
+
+  res.json({
+    original_text: text,
+    analysis,
+    length: text.length,
+    timestamp: new Date().toISOString()
+  });
+});
+
+// 📊 INFO ENDPOINT
+router.get("/info", (req, res) => {
+  res.json({
+    name: "🍥 NEO AI ENGINE 🍥",
+    version: "2.0.0",
+    models: Object.keys(AI_MODELS),
+    endpoints: {
+      "/api/ai/chat": "GET - Simple chat",
+      "/api/ai/chat-advanced": "POST - Chat with context",
+      "/api/ai/naruto": "GET - Naruto mode!",
+      "/api/ai/think": "GET - Deep thinking",
+      "/api/ai/analyze": "POST - Text analysis",
+      "/api/ai/info": "GET - This info"
+    },
+    features: [
+      "🤖 Multi-model AI",
+      "💾 Smart Caching",
+      "🍥 Naruto Mode",
+      "💭 Deep Thinking",
+      "🔍 Text Analysis",
+      "📚 Context Support"
+    ],
+    creator: "Célestin Olua",
+    inspiration: "Naruto Uzumaki"
+  });
+});
+
+// ❌ ERROR HANDLER
+router.use((err, req, res, next) => {
+  logger.error(err.message);
+  res.status(500).json({
+    error: "Erreur AI",
+    message: "🍥 Naruto's Chakra is disrupted! 🍥"
   });
 });
 
